@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>IPL Player Statistics Parallel Coordinates</title>
+    <script src="https://d3js.org/d3.v5.min.js"></script>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+      }
+      .axis path,
+      .axis line {
+        fill: none;
+        stroke: #888;
+        shape-rendering: crispEdges;
+      }
+      .line {
+        fill: none;
+        stroke: steelblue;
+        stroke-width: 2px;
+        opacity: 0.3;
+      }
+      .line.active {
+        opacity: 1;
+      }
+      .tooltip {
+        position: absolute;
+        background-color: white;
+        border: 1px solid #ddd;
+        padding: 10px;
+        font-size: 12px;
+        pointer-events: none;
+        opacity: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <h3 style="margin-top: 30px; margin-left: 40px">
+      IPL 2022 Players Statistics Using Parallel Coordinates
+    </h3>
+    <script>
+      var dragging = {};
+
+      d3.json("IPL_2022_PLAYERS.json")
+        .then(function (playerData) {
+          var filteredData = Object.entries(playerData).filter(function (d) {
+            return +d[1].runs;
+          });
+
+          var dimensions = [
+            "runs",
+            "balls",
+            "outs",
+            "fours",
+            "sixes",
+            "average",
+            "strikeRate",
+          ];
+
+          var margin = { top: 30, right: 10, bottom: 30, left: 50 },
+            width = 1200,
+            height = 500;
+
+          var svg = d3
+            .select("body")
+            .append("svg")
+            .style("margin-top", 30)
+            .style("margin-left", 80)
+            .attr("width", width + 100)
+            .attr("height", height + margin.top + margin.bottom)
+            .append("g")
+            .attr(
+              "transform",
+              "translate(" + margin.left + "," + margin.top + ")"
+            );
+
+          var x = d3.scalePoint().range([0, width]).domain(dimensions);
+          var y = {};
+          for (var i in dimensions) {
+            var dim = dimensions[i];
+            y[dim] = d3
+              .scaleLinear()
+              .domain([
+                0,
+                d3.max(filteredData, function (d) {
+                  return +d[1][dim];
+                }),
+              ])
+              .range([height, 0]);
+          }
+
+          function position(d) {
+            var v = dragging[d];
+            return v == null ? x(d) : v;
+          }
+
+          function transition(g) {
+            return g.transition().duration(500);
+          }
+
+          function path(d) {
+            return d3.line()(
+              dimensions.map(function (p) {
+                return [position(p), y[p](d[1][p])];
+              })
+            );
+          }
+
+          var pathSelection = svg
+            .selectAll(".player-path")
+            .data(filteredData)
+            .enter()
+            .append("path")
+            .attr("class", "line")
+            .attr("d", function (d) {
+              return d3.line()(
+                dimensions.map(function (p) {
+                  return [x(p), y[p](d[1][p])];
+                })
+              );
+            })
+            .on("click", function () {
+              svg
+                .selectAll(".line")
+                .classed("active", false)
+                .style("opacity", 0.3);
+              d3.select(this).classed("active", true).style("opacity", 1);
+            })
+            .on("mouseover", function (d) {
+              svg.selectAll(".line").style("cursor", "pointer");
+              showTooltip(d);
+            })
+            .on("mouseout", function () {
+              hideTooltip();
+            });
+
+          pathSelection
+            .transition()
+            .duration(1000)
+            .attrTween("d", function (d) {
+              var previous = d3.select(this).attr("d");
+              var current = d3.line()(
+                dimensions.map(function (p) {
+                  return [position(p), y[p](d[1][p])];
+                })
+              );
+            });
+          function updateColors() {
+            pathSelection.style("stroke", function (d) {
+              return +d[1].runs <= 300 ? "red" : "green";
+            });
+          }
+
+          var g = svg
+            .selectAll(".dimension")
+            .data(dimensions)
+            .enter()
+            .append("g")
+            .attr("class", "dimension")
+            .attr("transform", function (d) {
+              return "translate(" + x(d) + ")";
+            })
+            .call(
+              d3
+                .drag()
+                .on("start", function (d) {
+                  dragging[d] = x(d);
+                  svg.selectAll(".line").style("opacity", 0.3);
+                  svg.selectAll(".dimension text").style("cursor", "grabbing");
+                })
+                .on("drag", function (d) {
+                  dragging[d] = Math.min(width, Math.max(0, d3.event.x));
+                  pathSelection.attr("d", path);
+                  dimensions.sort(function (a, b) {
+                    return position(a) - position(b);
+                  });
+                  x.domain(dimensions);
+                  g.attr("transform", function (d) {
+                    return "translate(" + position(d) + ")";
+                  });
+                  updateColors();
+                })
+                .on("end", function () {
+                  svg.selectAll(".line").style("opacity", 0.3);
+                  svg.selectAll(".dimension text").style("cursor", "pointer");
+                })
+            );
+
+          g.append("g")
+            .attr("class", "axis")
+            .each(function (d) {
+              d3.select(this).call(d3.axisLeft().scale(y[d]));
+            })
+            .append("text")
+            .style("text-anchor", "middle")
+            .style("fill", "black")
+            .style("font-weight", "bold")
+            .style("font-size", "15px")
+            .attr("transform", "translate(0,-20)")
+            .text(function (d) {
+              return d;
+            });
+
+          var tooltip = d3
+            .select("body")
+            .append("div")
+            .attr("class", "tooltip")
+            .style("opacity", 0);
+
+          function showTooltip(d) {
+            tooltip.transition().duration(200).style("opacity", 0.9);
+            tooltip
+              .html(
+                "<strong>Player:</strong> " +
+                  d[0] +
+                  "<br><strong>Runs:</strong> " +
+                  d[1].runs +
+                  "<br><strong>Balls:</strong> " +
+                  d[1].balls +
+                  "<br><strong>Outs:</strong> " +
+                  d[1].outs +
+                  "<br><strong>Fours:</strong> " +
+                  d[1].fours +
+                  "<br><strong>Sixes:</strong> " +
+                  d[1].sixes +
+                  "<br><strong>Average:</strong> " +
+                  d[1].average +
+                  "<br><strong>Strike Rate:</strong> " +
+                  d[1].strikeRate
+              )
+              .style("left", d3.event.pageX + 10 + "px")
+              .style("top", d3.event.pageY - 28 + "px");
+          }
+
+          function hideTooltip() {
+            tooltip.transition().duration(500).style("opacity", 0);
+          }
+        })
+        .catch(function (error) {
+          console.log("Error loading data:", error);
+        });
+    </script>
+  </body>
+</html>
